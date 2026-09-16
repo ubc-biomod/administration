@@ -1,0 +1,9 @@
+credentials.json
+token_*.json
+sent_log.csv
+debug.log
+recipients.csv
+template.docx
+venv/
+__pycache__/
+*.pyc

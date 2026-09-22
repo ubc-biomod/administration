@@ -1,0 +1,7 @@
+venv
+email-automator/credentials.json
+email-automator/token_*.json
+email-automator/sent_log.csv
+email-automator/debug.log
+email-automator/recipients.csv
+email-automator/template.docx

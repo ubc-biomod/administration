@@ -145,7 +145,9 @@ Save `recipients.csv` in this same folder.
 
 
 
-## 5. Prepare your Word template
+## 5. Prepare your email template
+
+### Word template
 
 1. Open Microsoft Word
 2. Write the email **body** (not the subject — the subject goes in `config.yaml`)
@@ -153,14 +155,34 @@ Save `recipients.csv` in this same folder.
 
 ```text
 Hi {{first_name}},
-
+| `template_file`  | Usually `template.docx`; `.html` and `.htm` files are also supported                                                                                              |
 Thanks for being part of {{team_name}}. We hope to see you soon.
 
 UBC BioMod
 ```
 
 1. Save the file as **Word Document (*.docx)** named `template.docx` in this folder
-  (not `.doc`, not PDF, not Google Docs unless you download it as `.docx`). You can also use an `.html` or `.htm` file as `template_file`; its HTML formatting and paragraph spacing are used directly.
+  (not `.doc`, not PDF, not Google Docs unless you download it as `.docx`).
+
+Word formatting such as bold, italics, headings, lists, links, and paragraph spacing is converted into the HTML email.
+
+### HTML template
+
+You can use an existing `.html` or `.htm` file instead of a Word document. Set `template_file` in `config.yaml` to that file:
+
+```yaml
+template_file: template.htm
+```
+
+HTML formatting, inline styles, links, lists, and paragraph spacing are sent directly. The file can be UTF-8 or Windows-1252 encoded.
+
+Use the same placeholders as a Word template, for example `{{first_name}}`. Relative local images are supported. Keep them in a folder beside the HTML file and reference them like this:
+
+```html
+<img src="template_files/image001.png" alt="UBC BioMod">
+```
+
+The sender embeds those local images into the email. External image URLs and data-URI images are left unchanged, although some email clients may block externally hosted images.
 
 Placeholder names must match your CSV headers. Capitalization and spaces vs underscores are OK (`{{first_name}}` matches a column named `First Name`).
 
@@ -298,7 +320,7 @@ Python is not installed, or it was installed without **Add to PATH**. Repeat sec
 - `email.py` — the program (do not edit)
 - `config.yaml` — your settings (do edit)
 - `credentials.json` — downloaded from Google (never share publicly)
-- `recipients.csv` — your people
-- `template.docx` — your wording
+- `recipients.csv` — your people => or whatever else you've named in config.yaml
+ - `template.docx` — your email wording => or whatever else you've named in config.yaml
 - `Send Emails.bat` — double-click this on Windows
 

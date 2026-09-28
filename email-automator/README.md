@@ -160,7 +160,7 @@ UBC BioMod
 ```
 
 1. Save the file as **Word Document (*.docx)** named `template.docx` in this folder
-  (not `.doc`, not PDF, not Google Docs unless you download it as `.docx`)
+  (not `.doc`, not PDF, not Google Docs unless you download it as `.docx`). You can also use an `.html` or `.htm` file as `template_file`; its HTML formatting and paragraph spacing are used directly.
 
 Placeholder names must match your CSV headers. Capitalization and spaces vs underscores are OK (`{{first_name}}` matches a column named `First Name`).
 
@@ -276,6 +276,7 @@ Add that Gmail address as a test user on the Google Cloud consent screen (sectio
 
 **Python is not recognized when I double-click the sender**  
 Python is not installed, or it was installed without **Add to PATH**. Repeat section 1, then open a new Command Prompt.
+
 
 ---
 

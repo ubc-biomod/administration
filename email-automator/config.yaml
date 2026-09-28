@@ -3,15 +3,15 @@ sender_account: ubcbiomod@gmail.com
 
 # Files in this same folder (or a full path if they live somewhere else)
 csv_file: recipients.csv
-template_file: template.docx
+template_file: R1-wetlab-template.htm
 
 # Email subject line. You can use the same {{placeholders}} as in the Word template.
-subject: "Hello {{first_name}}"
+subject: "[ACTION REQUIRED] UBC BIOMOD {{wetlab_subteam}} - Sept 30-Oct 7 Round 1 Interview Invite"
 
 # Name for this batch. If you stop halfway and run again, already-sent people in
 # this campaign are skipped so nobody gets a duplicate. Change this name when you
 # start a brand-new email blast to the same people.
-campaign: default
+campaign: r1-wetlab2
 
 # Show this many sample emails on screen before sending.
 preview_count: 2

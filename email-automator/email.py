@@ -7,13 +7,16 @@ import argparse
 import base64
 import csv
 import logging
+import mimetypes
 import re
 import sys
 import time
 import traceback
 from datetime import datetime, timezone
 from html import escape as html_escape
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote
 
 # This file is named email.py, which would otherwise hide Python's built-in email package.
 def _import_stdlib_email_mime():
@@ -22,14 +25,15 @@ def _import_stdlib_email_mime():
     sys.path = [entry for entry in sys.path if entry not in ("", script_dir)]
     try:
         from email.mime.multipart import MIMEMultipart
+        from email.mime.image import MIMEImage
         from email.mime.text import MIMEText
 
-        return MIMEMultipart, MIMEText
+        return MIMEMultipart, MIMEImage, MIMEText
     finally:
         sys.path = saved_path
 
 
-MIMEMultipart, MIMEText = _import_stdlib_email_mime()
+MIMEMultipart, MIMEImage, MIMEText = _import_stdlib_email_mime()
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ALLOWED_SENDERS = (
@@ -42,6 +46,9 @@ GMAIL_SCOPES = (
     "openid",
 )
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
+HTML_IMAGE_RE = re.compile(
+    r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])([^"\']+)(\2)', re.IGNORECASE
+)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SENT_LOG_FIELDS = (
     "timestamp",
@@ -218,6 +225,52 @@ def create_example_files() -> None:
     say("You can now edit those two files, then run the sender as usual.")
 
 
+class PlainTextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"br", "div", "li", "p"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"div", "li", "p"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def text(self) -> str:
+        lines = (line.strip() for line in "".join(self.parts).splitlines())
+        return "\n".join(line for line in lines if line).strip()
+
+
+def extract_html_file_text(template_path: Path) -> str:
+    try:
+        html = read_html_template(template_path)
+        parser = PlainTextHTMLParser()
+        parser.feed(html)
+        text = parser.text()
+    except Exception as exc:
+        logging.exception("Failed to read HTML template")
+        fail(
+            f"Could not read {template_path.name} as HTML. Save it as UTF-8 and try again. "
+            f"Technical detail saved in debug.log ({exc})."
+        )
+    if not text:
+        fail(f"{template_path.name} appears to be empty. Add an HTML email body and try again.")
+    return text
+
+
+def read_html_template(template_path: Path) -> str:
+    raw = template_path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252")
+
+
 def read_recipients(csv_path: Path) -> tuple[list[str], list[dict[str, str]]]:
     if not csv_path.exists():
         fail(
@@ -282,9 +335,11 @@ def extract_template_text(template_path: Path) -> str:
             f"Can't find the Word template at {template_path}. "
             "Check that the file exists and that template_file in config.yaml matches its name."
         )
+    if template_path.suffix.lower() in {".htm", ".html"}:
+        return extract_html_file_text(template_path)
     if template_path.suffix.lower() != ".docx":
         fail(
-            f"The email template must be a Word .docx file (not .doc, .pdf, or .txt). "
+            f"The email template must be a Word .docx or HTML .htm/.html file. "
             f"You pointed template_file at {template_path.name}."
         )
 
@@ -319,6 +374,79 @@ def extract_template_text(template_path: Path) -> str:
     return text
 
 
+def extract_template_html(template_path: Path) -> str:
+    if template_path.suffix.lower() in {".htm", ".html"}:
+        try:
+            html = read_html_template(template_path).strip()
+        except Exception as exc:
+            logging.exception("Failed to read HTML template")
+            fail(
+                f"Could not read {template_path.name} as HTML. Save it as UTF-8 and try again. "
+                f"Technical detail saved in debug.log ({exc})."
+            )
+        if not html:
+            fail(f"{template_path.name} appears to be empty. Add an HTML email body and try again.")
+        return html
+
+    try:
+        import mammoth
+    except ImportError:
+        fail(
+            "The mammoth package is missing. Open a terminal in this folder and run:\n"
+            "  python -m pip install -r requirements.txt"
+        )
+
+    try:
+        result = mammoth.convert_to_html(str(template_path))
+        for message in result.messages:
+            logging.warning("DOCX conversion: %s", message)
+        html = result.value.strip()
+    except Exception as exc:
+        logging.exception("Failed to convert Word template to HTML")
+        fail(
+            f"Could not preserve the formatting in {template_path.name}. Technical detail saved in "
+            f"debug.log ({exc})."
+        )
+
+    if not html:
+        fail(f"{template_path.name} did not contain any content that could be formatted for email.")
+    # Email clients handle inline paragraph margins more consistently than DOCX spacing rules.
+    return re.sub(r"<p(\s[^>]*)?>", r'<p\1 style="margin: 0 0 10pt;">', html)
+
+
+def embed_local_images(html: str, template_dir: Path) -> tuple[str, list[tuple[str, bytes, str, str]]]:
+    images: list[tuple[str, bytes, str, str]] = []
+    image_index = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal image_index
+        source = unquote(match.group(3))
+        if source.startswith(("data:", "http://", "https://", "cid:")):
+            return match.group(0)
+
+        image_path = (template_dir / source).resolve()
+        try:
+            image_path.relative_to(template_dir.resolve())
+        except ValueError:
+            logging.warning("Skipping image outside template folder: %s", source)
+            return match.group(0)
+        if not image_path.is_file():
+            logging.warning("Could not find HTML image: %s", image_path)
+            return match.group(0)
+
+        content_type, _ = mimetypes.guess_type(image_path.name)
+        if not content_type or not content_type.startswith("image/"):
+            logging.warning("Skipping unsupported HTML image: %s", image_path)
+            return match.group(0)
+        image_index += 1
+        content_id = f"image-{image_index}@biomod"
+        subtype = content_type.split("/", 1)[1]
+        images.append((content_id, image_path.read_bytes(), subtype, image_path.name))
+        return f'{match.group(1)}{match.group(2)}cid:{content_id}{match.group(4)}'
+
+    return HTML_IMAGE_RE.sub(replace, html), images
+
+
 def find_placeholders(*texts: str) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -336,6 +464,14 @@ def substitute(text: str, row: dict[str, str]) -> str:
     def replace(match: re.Match[str]) -> str:
         key = normalize_header(match.group(1))
         return row.get(key, "")
+
+    return PLACEHOLDER_RE.sub(replace, text)
+
+
+def substitute_html(text: str, row: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = normalize_header(match.group(1))
+        return html_escape(row.get(key, ""))
 
     return PLACEHOLDER_RE.sub(replace, text)
 
@@ -503,14 +639,36 @@ def authenticate(sender: str, credentials_path: Path, token_path: Path):
     return gmail
 
 
-def build_message(sender: str, to_address: str, subject: str, body: str) -> dict:
-    message = MIMEMultipart("alternative")
+def build_message(
+    sender: str,
+    to_address: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+    inline_images: list[tuple[str, bytes, str, str]] | None = None,
+) -> dict:
+    message = MIMEMultipart("mixed")
+    alternative = MIMEMultipart("alternative")
+    message.attach(alternative)
     message["To"] = to_address
     message["From"] = sender
     message["Subject"] = subject
-    message.attach(MIMEText(body, "plain", "utf-8"))
-    html_body = "".join(f"<p>{html_escape(line) if line else '&nbsp;'}</p>" for line in body.split("\n"))
-    message.attach(MIMEText(html_body, "html", "utf-8"))
+    alternative.attach(MIMEText(body, "plain", "utf-8"))
+    if html_body is None:
+        html_body = "".join(
+            f"<p>{html_escape(line) if line else '&nbsp;'}</p>" for line in body.split("\n")
+        )
+    if inline_images:
+        related = MIMEMultipart("related")
+        related.attach(MIMEText(html_body, "html", "utf-8"))
+        for content_id, image_data, subtype, filename in inline_images:
+            image = MIMEImage(image_data, _subtype=subtype)
+            image.add_header("Content-ID", f"<{content_id}>")
+            image.add_header("Content-Disposition", "inline", filename=filename)
+            related.attach(image)
+        alternative.attach(related)
+    else:
+        alternative.attach(MIMEText(html_body, "html", "utf-8"))
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
     return {"raw": raw}
 
@@ -537,8 +695,19 @@ def describe_send_error(exc: Exception, HttpError) -> tuple[str, bool, bool]:
     return "network or unexpected Gmail error", False, False
 
 
-def send_one(gmail, sender: str, to_address: str, subject: str, body: str) -> None:
-    gmail.users().messages().send(userId="me", body=build_message(sender, to_address, subject, body)).execute()
+def send_one(
+    gmail,
+    sender: str,
+    to_address: str,
+    subject: str,
+    body: str,
+    html_body: str,
+    inline_images: list[tuple[str, bytes, str, str]],
+) -> None:
+    gmail.users().messages().send(
+        userId="me",
+        body=build_message(sender, to_address, subject, body, html_body, inline_images),
+    ).execute()
 
 
 def prepare_queue(
@@ -627,6 +796,8 @@ def run(args: argparse.Namespace) -> int:
 
     csv_headers, rows = read_recipients(csv_path)
     template_text = extract_template_text(template_path)
+    template_html = extract_template_html(template_path)
+    template_html, inline_images = embed_local_images(template_html, template_path.parent)
     placeholders = find_placeholders(template_text, subject_template)
     validate_placeholders(placeholders, csv_headers)
 
@@ -688,8 +859,9 @@ def run(args: argparse.Namespace) -> int:
         row_number = recipient["_row_number"]
         subject = substitute(subject_template, recipient)
         body = substitute(template_text, recipient)
+        html_body = substitute_html(template_html, recipient)
         try:
-            send_one(gmail, sender, address, subject, body)
+            send_one(gmail, sender, address, subject, body, html_body, inline_images)
             message = f"Sent to {address} (row {row_number})."
             say(f"[{index}/{len(queue)}] {message}")
             append_sent_log(

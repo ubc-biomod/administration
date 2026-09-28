@@ -11,7 +11,7 @@ subject: "[ACTION REQUIRED] UBC BIOMOD {{wetlab_subteam}} - Sept 30-Oct 7 Round 
 # Name for this batch. If you stop halfway and run again, already-sent people in
 # this campaign are skipped so nobody gets a duplicate. Change this name when you
 # start a brand-new email blast to the same people.
-campaign: r1-wetlab2
+campaign: r1-wetlab-protac
 
 # Show this many sample emails on screen before sending.
 preview_count: 2

@@ -3,6 +3,7 @@ token_*.json
 sent_log.csv
 debug.log
 recipients.csv
+recipients*.csv
 template.docx
 template.htm
 venv/

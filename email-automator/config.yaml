@@ -2,16 +2,16 @@
 sender_account: ubcbiomod@gmail.com
 
 # Files in this same folder (or a full path if they live somewhere else)
-csv_file: recipients_wetlab_rejection.csv
-template_file: wetlab-rejection-r1-template.htm
+csv_file:  recipients_computational_reject.csv
+template_file: compute-rejection-r1-template.htm
 
 # Email subject line. You can use the same {{placeholders}} as in the Word template.
-subject: "UBC BIOMOD Wetlab Subteam Recruitment Decision"
+subject: "UBC BIOMOD Computational Subteam Recruitment Decision"
 
 # Name for this batch. If you stop halfway and run again, already-sent people in
 # this campaign are skipped so nobody gets a duplicate. Change this name when you
 # start a brand-new email blast to the same people.
-campaign: r1-wetlab-rejection
+campaign: r1-computational-rejection1
 
 # Show this many sample emails on screen before sending.
 preview_count: 2
